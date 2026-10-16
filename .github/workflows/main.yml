@@ -31,21 +31,30 @@ jobs:
 
       - name: Create RDP User with Fixed Password
         run: |
-          $password = "NARUTOMODZRDP"
+          $password = "NarutoModZRDP@123"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
-          }
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-         
-          echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-         
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
+
+          $rdpUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
+          if ($null -eq $rdpUser) {
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+          } else {
+              Set-LocalUser -Name "RDP" -Password $securePass
           }
 
+          # Add group membership only if it is not already present.
+          foreach ($group in @("Administrators", "Remote Desktop Users")) {
+              $members = Get-LocalGroupMember -Group $group -ErrorAction Stop
+              if (-not ($members | Where-Object { $_.Name -match "\\RDP$" })) {
+                  Add-LocalGroupMember -Group $group -Member "RDP"
+              }
+          }
+
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+              throw "RDP user creation or update failed."
+          }
+
+          # Do not print the password into the workflow logs.
+          "RDP_USERNAME=RDP" >> $env:GITHUB_ENV
       - name: Install Tailscale
         run: |
           $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
@@ -92,7 +101,7 @@ jobs:
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
           Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "Password: use the password configured in the workflow"
           Write-Host "==================`n"
 
           $rdpProfile = "C:\Users\RDP"
